@@ -12,6 +12,7 @@ sparse, animator-friendly animation curves from dense or baked keys.
 - Synchronizes linked additive detail when sparse base keys are retimed or
   deleted.
 - Handles Graph Editor key, channel, or animated-control selection.
+- Can target every curve on the anim layers selected in the Layer Editor.
 
 ## Installation
 
@@ -30,5 +31,16 @@ selection watchers, timers, callbacks, and script jobs when it closes.
 4. Enable **Bake detail to additive layer** only when residual detail output is
    required.
 
+To reduce whole anim layers, turn on **Target selected anim layers** and
+select the layers in the Layer Editor (the base layer counts too). Reduce,
+Live Preview and Swap then work on every curve of those layers, ignoring the
+Graph Editor and viewport selection. Locked layers and linked additive detail
+layers are skipped and listed, so protected layers are never edited.
+
 Advanced fitting, sampling, extrema, key-limit, and buffer settings are in the
 collapsed **Advanced Settings** panel.
+
+## Testing
+
+`python tests/test_selected_layers.py` checks the anim layer targeting without
+Maya, using a fake `maya.cmds`.
