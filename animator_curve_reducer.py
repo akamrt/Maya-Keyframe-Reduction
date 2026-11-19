@@ -1193,9 +1193,77 @@ def _curve_editability_problem(curve):
     return ""
 
 
+def _layer_scope_enabled():
+    """True when targets come from the anim layers selected in the Layer Editor."""
+    control = UI.get("target_selected_layers")
+    if control:
+        try:
+            if cmds.checkBoxGrp(control, exists=True):
+                return bool(cmds.checkBoxGrp(
+                    control, query=True, value1=True
+                ))
+        except Exception:
+            pass
+    return bool(_option_int("targetSelectedLayers", 0))
+
+
+def _selected_anim_layers():
+    """Anim layers selected in the Layer Editor, base layer included."""
+    layers = []
+    for layer in cmds.ls(type="animLayer") or []:
+        try:
+            if cmds.animLayer(layer, query=True, selected=True):
+                layers.append(layer)
+        except Exception:
+            continue
+    return layers
+
+
+def _selected_layer_curves():
+    """Every curve on the selected anim layers.
+
+    Locked layers and this tool's linked detail layers are skipped with a
+    reason, so a layer the animator protected is never edited.
+    """
+    curves = []
+    skipped = []
+    layers = _selected_anim_layers()
+    for layer in layers:
+        try:
+            locked = bool(cmds.animLayer(layer, query=True, lock=True))
+        except Exception:
+            locked = False
+        if locked:
+            skipped.append((layer, "layer is locked; unlock it to reduce"))
+            continue
+        if cmds.objExists(layer + "." + LINK_DATA_ATTR):
+            skipped.append((
+                layer,
+                "linked detail layer; reduce its base curves instead",
+            ))
+            continue
+        try:
+            plugs = cmds.animLayer(layer, query=True, attribute=True) or []
+        except Exception:
+            plugs = []
+        for plug in plugs:
+            curve = _find_layer_curve_for_plug(layer, plug)
+            if curve and curve not in curves:
+                curves.append(curve)
+    source = (
+        "curves on {0} selected anim layer(s)".format(len(layers))
+        if layers else ""
+    )
+    return curves, skipped, source
+
+
 def collect_target_curves():
-    curves, source = _graph_editor_selected_channel_curves()
-    if not curves:
+    if _layer_scope_enabled():
+        curves, skipped, source = _selected_layer_curves()
+    else:
+        curves, source = _graph_editor_selected_channel_curves()
+        skipped = []
+    if not curves and not _layer_scope_enabled():
         curves = _viewport_selected_curves()
         source = (
             "all animated channels on viewport/DAG selection"
@@ -1203,7 +1271,6 @@ def collect_target_curves():
         )
 
     valid = []
-    skipped = []
     for curve in curves:
         if curve in valid:
             continue
@@ -1217,6 +1284,8 @@ def collect_target_curves():
 
 def _selected_key_work_items():
     """Return contiguous Graph Editor key selections across all channels."""
+    if _layer_scope_enabled():
+        return [], [], False
     try:
         selected_curves = cmds.keyframe(
             query=True,
@@ -3482,6 +3551,15 @@ def _install_link_auto_sync():
     return True
 
 
+def _layer_scope_toggled(value=None, *_unused):
+    cmds.optionVar(intValue=(
+        OPTION_PREFIX + "targetSelectedLayers",
+        int(bool(value)),
+    ))
+    UI.pop("target_signature", None)
+    _update_target_summary()
+
+
 def _auto_sync_toggled(value=None, *_unused):
     enabled = bool(value)
     cmds.optionVar(intValue=(
@@ -4857,12 +4935,27 @@ def _target_summary_text():
         )
     else:
         curves, skipped, source = collect_target_curves()
-        if not curves:
+        if _layer_scope_enabled():
+            if not curves:
+                text = (
+                    "TARGETS  /  Select one or more unlocked anim layers in "
+                    "the Layer Editor."
+                )
+                if skipped:
+                    text += "  Skipped: " + "; ".join(
+                        "{0} ({1})".format(item[0], item[1])
+                        for item in skipped[:3]
+                    )
+                return text
+            text = "TARGETS  /  {0} channel(s) on {1} selected anim layer(s).".format(
+                len(curves), len(_selected_anim_layers())
+            )
+        elif not curves:
             return (
                 "TARGETS  /  Select Graph Editor keys or channels, or "
                 "select animated controls."
             )
-        if source == "selected Graph Editor channels":
+        elif source == "selected Graph Editor channels":
             text = "TARGETS  /  {0} selected Graph Editor channel(s).".format(
                 len(curves)
             )
@@ -6485,7 +6578,9 @@ def show_animator_curve_reducer():
         annotation=(
             "Selected key blocks first; otherwise selected Graph Editor "
             "channels; otherwise every animated channel on the selected "
-            "controls. Press Esc in the progress window to stop safely."
+            "controls. With Target selected anim layers on, every curve of "
+            "the selected layers. Press Esc in the progress window to stop "
+            "safely."
         ),
     )
     UI["sync_linked_timing"] = cmds.button(
@@ -6510,6 +6605,19 @@ def show_animator_curve_reducer():
         annotation=(
             "After reduction, bake the original motion onto a new muted "
             "additive layer. This is off by default."
+        ),
+    )
+    UI["target_selected_layers"] = cmds.checkBoxGrp(
+        label="Target selected anim layers",
+        numberOfCheckBoxes=1,
+        value1=bool(_option_int("targetSelectedLayers", 0)),
+        columnWidth2=(245, 150),
+        changeCommand1=_layer_scope_toggled,
+        annotation=(
+            "Reduce, Preview and Swap work on every curve of the anim layers "
+            "selected in the Layer Editor (base layer included) instead of "
+            "the Graph Editor or viewport selection. Locked layers and "
+            "linked detail layers are skipped."
         ),
     )
     UI["auto_sync_linked_timing"] = cmds.checkBoxGrp(
